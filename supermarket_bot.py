@@ -80,7 +80,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             f"📞 *Operator bilan bog'lanish:*\n\n"
             f"📱 Telefon: `{OPERATOR_PHONE}`\n\n"
-            f"Ish vaqti: 09:00 - 18:00 (Dush-Shan)",
+            f"Ish vaqti: 08:00 - 00:00 (Dush-Yak)",
             parse_mode="Markdown"
         )
 
