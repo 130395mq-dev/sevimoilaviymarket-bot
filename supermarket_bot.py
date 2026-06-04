@@ -1,10 +1,10 @@
 import logging
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # ==============================
-# TOKEN - Railway Environment Variable orqali
+# TOKEN
 # ==============================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8888202399:AAEX6IY4vVleS2AGYcYocCL61LVqcYikLuU")
 
@@ -13,8 +13,6 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8888202399:AAEX6IY4vVleS2AGYcYocCL61LVq
 # ==============================
 ORDER_LINK = "https://b2b.moysklad.ru/public/Bya8IC3N6odI"
 OPERATOR_PHONE = "+998900769441"
-
-# Video - Telegram file_id yoki to'g'ridan-to'g'ri .mp4 linki
 VIDEO_URL = os.environ.get("VIDEO_URL", "YOUR_VIDEO_FILE_ID_OR_URL")
 
 VIDEO_CAPTION = """
@@ -51,13 +49,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
     except Exception as e:
-        # Video yuklanmasa, matn bilan javob beradi
         logger.error(f"Video yuborishda xatolik: {e}")
         await update.message.reply_text(
             VIDEO_CAPTION,
             parse_mode="Markdown",
             reply_markup=reply_markup
         )
+
+
+# ==============================
+# VIDEO FILE_ID OLISH
+# ==============================
+async def get_video_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.video:
+        file_id = update.message.video.file_id
+        logger.info(f"VIDEO FILE_ID: {file_id}")
+        await update.message.reply_text(f"✅ Video file_id:\n`{file_id}`", parse_mode="Markdown")
 
 
 # ==============================
@@ -80,7 +87,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             f"📞 *Operator bilan bog'lanish:*\n\n"
             f"📱 Telefon: `{OPERATOR_PHONE}`\n\n"
-            f"Ish vaqti: 08:00 - 00:00 (Dush-Yak)",
+            f"Ish vaqti: 10:00 - 22:00 (Dush-Yak)",
             parse_mode="Markdown"
         )
 
@@ -93,6 +100,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.VIDEO, get_video_id))
 
     logger.info("Bot ishga tushdi...")
     app.run_polling()
