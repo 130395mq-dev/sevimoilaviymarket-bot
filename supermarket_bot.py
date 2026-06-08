@@ -2,7 +2,8 @@ import logging
 import os
 import io
 import aiohttp
-from PIL import Image, ImageDraw, ImageFont
+import barcode
+from barcode.writer import ImageWriter
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
@@ -80,6 +81,27 @@ async def get_customer_by_phone(phone: str):
     return None
 
 
+async def get_customer_bonus(customer_id: str):
+    """SEVIMLI BONUS maxsus maydonini olish"""
+    headers = {"Authorization": f"Bearer {MS_TOKEN}"}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            f"{MS_URL}/entity/counterparty/{customer_id}",
+            headers=headers,
+        ) as resp:
+            data = await resp.json()
+            # Bonus points
+            bonus = data.get("bonusPoints", 0)
+            # Maxsus maydonlar (attributes)
+            attributes = data.get("attributes", [])
+            for attr in attributes:
+                name = attr.get("name", "").lower()
+                if "bonus" in name or "балл" in name or "ball" in name:
+                    bonus = attr.get("value", bonus)
+                    break
+            return bonus
+
+
 async def get_customer_purchases(customer_id: str):
     headers = {"Authorization": f"Bearer {MS_TOKEN}"}
     async with aiohttp.ClientSession() as session:
@@ -97,43 +119,22 @@ async def get_customer_purchases(customer_id: str):
 
 
 # ==============================
-# SHTRIX-KOD GENERATSIYA
+# SHTRIX-KOD GENERATSIYA (Code128)
 # ==============================
 def generate_barcode(code: str) -> io.BytesIO:
-    # EAN-13 yoki Code128 shtrix-kod Pillow bilan
-    W, H = 600, 200
-    img = Image.new("RGB", (W, H), "white")
-    draw = ImageDraw.Draw(img)
-
-    # Shtrix-kod chizish (Code128 uslubida)
-    digits = code.strip()
-    bar_width = 2
-    x = 40
-    # Oddiy shtrix pattern (vizual)
-    import hashlib
-    seed = int(hashlib.md5(digits.encode()).hexdigest(), 16)
-    bar_x = 40
-    for i, ch in enumerate(digits * 3):
-        val = (ord(ch) + i + seed) % 7
-        width = bar_width * (1 + val % 3)
-        if (ord(ch) + i) % 2 == 0:
-            draw.rectangle([bar_x, 20, bar_x + width, 160], fill="black")
-        bar_x += width + 1
-        if bar_x > W - 40:
-            break
-
-    # Raqam yozuv
-    try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
-    except:
-        font = ImageFont.load_default()
-
-    bbox = draw.textbbox((0, 0), digits, font=font)
-    tw = bbox[2] - bbox[0]
-    draw.text(((W - tw) // 2, 165), digits, fill="black", font=font)
-
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    CODE128 = barcode.get_barcode_class('code128')
+    bc = CODE128(code, writer=ImageWriter())
+    bc.write(buf, options={
+        "module_width": 0.4,
+        "module_height": 15.0,
+        "font_size": 10,
+        "text_distance": 5,
+        "quiet_zone": 6.5,
+        "write_text": True,
+        "background": "white",
+        "foreground": "black",
+    })
     buf.seek(0)
     return buf
 
@@ -222,8 +223,7 @@ async def show_card(message, phone: str):
     if not customer:
         await message.reply_text(
             f"❌ {phone} raqamli mijoz topilmadi.\n"
-            f"Kassada ro'yxatdan o'tganmisiz?\n\n"
-            f"Raqamni o'zgartirish uchun tugmani bosing.",
+            f"Kassada ro'yxatdan o'tganmisiz?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔄 Raqamni o'zgartirish", callback_data="change_phone")]
             ])
@@ -232,15 +232,11 @@ async def show_card(message, phone: str):
 
     name = customer.get("name", "Noma'lum")
     customer_id = customer.get("id", "")
-
-    # Discount karta raqami
     discount_card = customer.get("discountCardNumber", "") or ""
-
-    # Bonus ballar — MoySklad'da "bonusPoints" yoki maxsus maydon
-    bonus = customer.get("bonusPoints", 0)
-
-    # Agar discount card bo'lmasa customer_id ishlatamiz
     barcode_data = discount_card if discount_card else customer_id[:13]
+
+    # Bonus ballarni olish
+    bonus = await get_customer_bonus(customer_id)
 
     barcode_buf = generate_barcode(barcode_data)
 
