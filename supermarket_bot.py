@@ -432,12 +432,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Tugmalar
     if text == t(lang, "video"):
+        context.user_data["waiting_phone"] = False
         try:
             await update.message.reply_video(video=VIDEO_URL, caption=t(lang, "video_caption"))
         except Exception as e:
             logger.error(f"Video xatolik: {e}")
 
     elif text == t(lang, "order"):
+        context.user_data["waiting_phone"] = False
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, "order_btn"), url=ORDER_LINK)]])
         await update.message.reply_text(t(lang, "order_text"), reply_markup=keyboard)
 
@@ -451,6 +453,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(t(lang, "enter_phone"))
 
     elif text == t(lang, "operator"):
+        context.user_data["waiting_phone"] = False
         await update.message.reply_text(t(lang, "operator_text", phone=OPERATOR_PHONE))
 
     elif text == t(lang, "admin_panel") and is_admin:
