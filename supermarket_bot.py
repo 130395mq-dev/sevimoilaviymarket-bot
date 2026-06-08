@@ -104,6 +104,11 @@ async def init_db():
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS lang TEXT DEFAULT 'uz'")
         except:
             pass
+        # phone NOT NULL constraint olib tashlash
+        try:
+            await conn.execute("ALTER TABLE users ALTER COLUMN phone DROP NOT NULL")
+        except:
+            pass
     logger.info("Database tayyor!")
 
 
@@ -123,7 +128,7 @@ async def save_user_phone(user_id: int, phone: str):
 async def save_user_lang(user_id: int, lang: str):
     async with db_pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO users (user_id, lang) VALUES ($1, $2)
+            INSERT INTO users (user_id, phone, lang) VALUES ($1, NULL, $2)
             ON CONFLICT (user_id) DO UPDATE SET lang = $2
         """, user_id, lang)
 
