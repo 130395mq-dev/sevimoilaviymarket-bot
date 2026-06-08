@@ -1,10 +1,11 @@
 import logging
 import os
 import io
+import asyncpg
 import aiohttp
 import barcode
 from barcode.writer import ImageWriter
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8617768849:AAGeu2DFAZrJYi1kJqanD2M-yEnbERqruAE")
@@ -13,11 +14,63 @@ OPERATOR_PHONE = "+998900769441"
 VIDEO_URL = os.environ.get("VIDEO_URL", "YOUR_VIDEO_FILE_ID")
 MS_TOKEN = os.environ.get("MS_TOKEN", "a147c1756372f5ed43ead9c6b77d1b8ab56ae35a")
 MS_URL = "https://api.moysklad.ru/api/remap/1.2"
-
-user_phones = {}
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:DKRngECbMYhNJQIjSUZPCPOtdKLhFrrk@postgres.railway.internal:5432/railway")
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+db_pool = None
+
+
+# ==============================
+# DATABASE
+# ==============================
+async def init_db():
+    global db_pool
+    db_pool = await asyncpg.create_pool(DATABASE_URL)
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT PRIMARY KEY,
+                phone TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+    logger.info("Database tayyor!")
+
+
+async def get_user_phone(user_id: int):
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT phone FROM users WHERE user_id = $1", user_id)
+        return row["phone"] if row else None
+
+
+async def save_user_phone(user_id: int, phone: str):
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO users (user_id, phone) VALUES ($1, $2)
+            ON CONFLICT (user_id) DO UPDATE SET phone = $2
+        """, user_id, phone)
+
+
+async def delete_user_phone(user_id: int):
+    async with db_pool.acquire() as conn:
+        await conn.execute("DELETE FROM users WHERE user_id = $1", user_id)
+
+
+# ==============================
+# KEYBOARD
+# ==============================
+def main_reply_keyboard():
+    return ReplyKeyboardMarkup(
+        [
+            ["📹 Video Qo'llanma"],
+            ["🛍 Buyurtma Boshlash", "🎁 Nakopital Karta"],
+            ["📞 Operator"],
+        ],
+        resize_keyboard=True,
+        persistent=True
+    )
 
 
 # ==============================
@@ -47,7 +100,6 @@ def phone_variants(phone: str):
 async def get_customer_by_phone(phone: str):
     headers = {"Authorization": f"Bearer {MS_TOKEN}"}
     variants = phone_variants(phone)
-    logger.info(f"Qidirilayotgan variantlar: {variants}")
 
     async with aiohttp.ClientSession() as session:
         for variant in variants:
@@ -59,7 +111,6 @@ async def get_customer_by_phone(phone: str):
                 data = await resp.json()
                 rows = data.get("rows", [])
                 if rows:
-                    logger.info(f"Topildi: {variant}")
                     return rows[0]
 
         digits = ''.join(filter(str.isdigit, phone))
@@ -75,26 +126,18 @@ async def get_customer_by_phone(phone: str):
                 row_phones = row.get("phone", "") or ""
                 row_digits = ''.join(filter(str.isdigit, row_phones))
                 if short in row_digits:
-                    logger.info(f"Search orqali topildi: {row_phones}")
                     return row
 
     return None
 
 
 async def get_customer_bonus(customer_id: str):
-    """SEVIMLI BONUS maxsus maydonini olish"""
     headers = {"Authorization": f"Bearer {MS_TOKEN}"}
     async with aiohttp.ClientSession() as session:
-        async with session.get(
-            f"{MS_URL}/entity/counterparty/{customer_id}",
-            headers=headers,
-        ) as resp:
+        async with session.get(f"{MS_URL}/entity/counterparty/{customer_id}", headers=headers) as resp:
             data = await resp.json()
-            # Bonus points
             bonus = data.get("bonusPoints", 0)
-            # Maxsus maydonlar (attributes)
-            attributes = data.get("attributes", [])
-            for attr in attributes:
+            for attr in data.get("attributes", []):
                 name = attr.get("name", "").lower()
                 if "bonus" in name or "балл" in name or "ball" in name:
                     bonus = attr.get("value", bonus)
@@ -119,7 +162,7 @@ async def get_customer_purchases(customer_id: str):
 
 
 # ==============================
-# SHTRIX-KOD GENERATSIYA (Code128)
+# SHTRIX-KOD
 # ==============================
 def generate_barcode(code: str) -> io.BytesIO:
     buf = io.BytesIO()
@@ -140,77 +183,13 @@ def generate_barcode(code: str) -> io.BytesIO:
 
 
 # ==============================
-# MENYULAR
+# /start
 # ==============================
-def main_menu_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛍 Buyurtma Boshlash", callback_data="order")],
-        [InlineKeyboardButton("🎁 Nakopital Karta", callback_data="card")],
-        [InlineKeyboardButton("📞 Operator bilan Bog'lanish", callback_data="operator")],
-    ])
-
-VIDEO_CAPTION = "Assalomu alaykum! Ushbu qo'llanma orqali buyurtma berishni o'rganishingiz mumkin...\n\nQuyidagi tugmalardan birini tanlang 👇"
-
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        await update.message.reply_video(
-            video=VIDEO_URL,
-            caption=VIDEO_CAPTION,
-            reply_markup=main_menu_keyboard()
-        )
-    except Exception as e:
-        logger.error(f"Video xatolik: {e}")
-        await update.message.reply_text(VIDEO_CAPTION, reply_markup=main_menu_keyboard())
-
-
-async def get_video_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.video:
-        file_id = update.message.video.file_id
-        logger.info(f"VIDEO FILE_ID: {file_id}")
-        await update.message.reply_text(f"Video file_id: {file_id}")
-
-
-# ==============================
-# TUGMALAR
-# ==============================
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-
-    if query.data == "order":
-        keyboard = [[InlineKeyboardButton("🔗 Buyurtma sahifasiga o'tish", url=ORDER_LINK)]]
-        await query.message.reply_text("🛍 Buyurtma berish uchun:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif query.data == "operator":
-        await query.message.reply_text(
-            f"📞 Operator bilan bog'lanish:\n\n"
-            f"📱 Telefon: {OPERATOR_PHONE}\n\n"
-            f"Ish vaqti: 08:00 - 00:00 (Dush-Yak)"
-        )
-
-    elif query.data == "card":
-        if user_id in user_phones:
-            await show_card(query.message, user_phones[user_id])
-        else:
-            context.user_data["waiting_phone"] = True
-            await query.message.reply_text(
-                "📱 Kassada ro'yxatdan o'tgan telefon raqamingizni kiriting:\n\nMisol: +998901234567"
-            )
-
-    elif query.data == "purchases":
-        if user_id in user_phones:
-            await show_purchases(query.message, user_phones[user_id])
-
-    elif query.data == "change_phone":
-        if user_id in user_phones:
-            del user_phones[user_id]
-        context.user_data["waiting_phone"] = True
-        await query.message.reply_text("📱 Yangi telefon raqamingizni kiriting:")
-
-    elif query.data == "back_menu":
-        await query.message.reply_text("Asosiy menyu:", reply_markup=main_menu_keyboard())
+    await update.message.reply_text(
+        "Assalomu alaykum! Sevimli Market botiga xush kelibsiz!\n\nQuyidagi tugmalardan birini tanlang 👇",
+        reply_markup=main_reply_keyboard()
+    )
 
 
 # ==============================
@@ -221,12 +200,10 @@ async def show_card(message, phone: str):
     customer = await get_customer_by_phone(phone)
 
     if not customer:
+        user_id = message.chat.id
+        await delete_user_phone(user_id)
         await message.reply_text(
-            f"❌ {phone} raqamli mijoz topilmadi.\n"
-            f"Kassada ro'yxatdan o'tganmisiz?",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Raqamni o'zgartirish", callback_data="change_phone")]
-            ])
+            f"❌ {phone} raqamli mijoz topilmadi.\nKassada ro'yxatdan o'tganmisiz?\n\nRaqamni qayta kiriting:"
         )
         return
 
@@ -234,16 +211,12 @@ async def show_card(message, phone: str):
     customer_id = customer.get("id", "")
     discount_card = customer.get("discountCardNumber", "") or ""
     barcode_data = discount_card if discount_card else customer_id[:13]
-
-    # Bonus ballarni olish
     bonus = await get_customer_bonus(customer_id)
-
     barcode_buf = generate_barcode(barcode_data)
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🛍 Xaridlarim", callback_data="purchases")],
         [InlineKeyboardButton("🔄 Raqamni o'zgartirish", callback_data="change_phone")],
-        [InlineKeyboardButton("🏠 Asosiy menyu", callback_data="back_menu")],
     ])
 
     await message.reply_photo(
@@ -274,7 +247,6 @@ async def show_purchases(message, phone: str):
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🎁 Kartam", callback_data="card")],
-        [InlineKeyboardButton("🏠 Asosiy menyu", callback_data="back_menu")],
     ])
 
     if not purchases:
@@ -291,31 +263,99 @@ async def show_purchases(message, phone: str):
 
 
 # ==============================
-# MATN QABUL QILISH
+# MATN XABARLAR
 # ==============================
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
     user_id = update.message.from_user.id
 
-    if not context.user_data.get("waiting_phone"):
+    # Telefon raqam kutilayotgan bo'lsa
+    if context.user_data.get("waiting_phone"):
+        phone = text.strip()
+        digits = ''.join(filter(str.isdigit, phone))
+        if len(digits) < 9:
+            await update.message.reply_text("❌ Noto'g'ri format. Misol: +998901234567 yoki 901234567")
+            return
+        context.user_data["waiting_phone"] = False
+        await save_user_phone(user_id, phone)
+        await show_card(update.message, phone)
         return
 
-    phone = update.message.text.strip()
-    digits = ''.join(filter(str.isdigit, phone))
+    if text == "📹 Video Qo'llanma":
+        try:
+            await update.message.reply_video(
+                video=VIDEO_URL,
+                caption="Ushbu qo'llanma orqali buyurtma berishni o'rganishingiz mumkin..."
+            )
+        except Exception as e:
+            logger.error(f"Video xatolik: {e}")
+            await update.message.reply_text("Video yuklanmoqda, iltimos kuting...")
 
-    if len(digits) < 9:
-        await update.message.reply_text("❌ Noto'g'ri format. Misol: +998901234567 yoki 901234567")
-        return
+    elif text == "🛍 Buyurtma Boshlash":
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Buyurtma sahifasiga o'tish", url=ORDER_LINK)]])
+        await update.message.reply_text("🛍 Buyurtma berish uchun:", reply_markup=keyboard)
 
-    context.user_data["waiting_phone"] = False
-    user_phones[user_id] = phone
-    await show_card(update.message, phone)
+    elif text == "🎁 Nakopital Karta":
+        phone = await get_user_phone(user_id)
+        if phone:
+            await show_card(update.message, phone)
+        else:
+            context.user_data["waiting_phone"] = True
+            await update.message.reply_text(
+                "📱 Kassada ro'yxatdan o'tgan telefon raqamingizni kiriting:\n\nMisol: +998901234567"
+            )
+
+    elif text == "📞 Operator":
+        await update.message.reply_text(
+            f"📞 Operator bilan bog'lanish:\n\n"
+            f"📱 Telefon: {OPERATOR_PHONE}\n\n"
+            f"Ish vaqti: 08:00 - 00:00 (Dush-Yak)"
+        )
+
+
+# ==============================
+# INLINE TUGMALAR
+# ==============================
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    if query.data == "purchases":
+        phone = await get_user_phone(user_id)
+        if phone:
+            await show_purchases(query.message, phone)
+
+    elif query.data == "card":
+        phone = await get_user_phone(user_id)
+        if phone:
+            await show_card(query.message, phone)
+
+    elif query.data == "change_phone":
+        await delete_user_phone(user_id)
+        context.user_data["waiting_phone"] = True
+        await query.message.reply_text("📱 Yangi telefon raqamingizni kiriting:")
+
+
+# ==============================
+# VIDEO FILE_ID
+# ==============================
+async def get_video_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.video:
+        file_id = update.message.video.file_id
+        logger.info(f"VIDEO FILE_ID: {file_id}")
+        await update.message.reply_text(f"Video file_id: {file_id}")
 
 
 # ==============================
 # MAIN
 # ==============================
+async def post_init(application):
+    await init_db()
+
+
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.VIDEO, get_video_id))
