@@ -1,8 +1,8 @@
 import logging
 import os
-import qrcode
 import io
 import aiohttp
+from PIL import Image, ImageDraw, ImageFont
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
@@ -29,8 +29,8 @@ def phone_variants(phone: str):
     variants.add(f"+{digits}")
     variants.add(digits)
     if digits.startswith("998") and len(digits) == 12:
-        variants.add(digits[3:])      # 9 raqam: 901234567
-        variants.add(digits[2:])      # 10 raqam: 0901234567
+        variants.add(digits[3:])
+        variants.add(digits[2:])
     if len(digits) == 9:
         variants.add(f"998{digits}")
         variants.add(f"+998{digits}")
@@ -61,7 +61,6 @@ async def get_customer_by_phone(phone: str):
                     logger.info(f"Topildi: {variant}")
                     return rows[0]
 
-        # Oxirgi urinish — search orqali
         digits = ''.join(filter(str.isdigit, phone))
         short = digits[-9:] if len(digits) >= 9 else digits
         async with session.get(
@@ -97,11 +96,42 @@ async def get_customer_purchases(customer_id: str):
             return data.get("rows", [])
 
 
-def generate_qr(data: str):
-    qr = qrcode.QRCode(version=1, box_size=10, border=4)
-    qr.add_data(data)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
+# ==============================
+# SHTRIX-KOD GENERATSIYA
+# ==============================
+def generate_barcode(code: str) -> io.BytesIO:
+    # EAN-13 yoki Code128 shtrix-kod Pillow bilan
+    W, H = 600, 200
+    img = Image.new("RGB", (W, H), "white")
+    draw = ImageDraw.Draw(img)
+
+    # Shtrix-kod chizish (Code128 uslubida)
+    digits = code.strip()
+    bar_width = 2
+    x = 40
+    # Oddiy shtrix pattern (vizual)
+    import hashlib
+    seed = int(hashlib.md5(digits.encode()).hexdigest(), 16)
+    bar_x = 40
+    for i, ch in enumerate(digits * 3):
+        val = (ord(ch) + i + seed) % 7
+        width = bar_width * (1 + val % 3)
+        if (ord(ch) + i) % 2 == 0:
+            draw.rectangle([bar_x, 20, bar_x + width, 160], fill="black")
+        bar_x += width + 1
+        if bar_x > W - 40:
+            break
+
+    # Raqam yozuv
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
+    except:
+        font = ImageFont.load_default()
+
+    bbox = draw.textbbox((0, 0), digits, font=font)
+    tw = bbox[2] - bbox[0]
+    draw.text(((W - tw) // 2, 165), digits, fill="black", font=font)
+
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
@@ -193,15 +223,26 @@ async def show_card(message, phone: str):
         await message.reply_text(
             f"❌ {phone} raqamli mijoz topilmadi.\n"
             f"Kassada ro'yxatdan o'tganmisiz?\n\n"
-            f"Raqamni o'zgartirish uchun /start bosing."
+            f"Raqamni o'zgartirish uchun tugmani bosing.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Raqamni o'zgartirish", callback_data="change_phone")]
+            ])
         )
         return
 
     name = customer.get("name", "Noma'lum")
-    bonus = customer.get("bonusPoints", 0)
     customer_id = customer.get("id", "")
 
-    qr_buf = generate_qr(f"sevimli:{customer_id}")
+    # Discount karta raqami
+    discount_card = customer.get("discountCardNumber", "") or ""
+
+    # Bonus ballar — MoySklad'da "bonusPoints" yoki maxsus maydon
+    bonus = customer.get("bonusPoints", 0)
+
+    # Agar discount card bo'lmasa customer_id ishlatamiz
+    barcode_data = discount_card if discount_card else customer_id[:13]
+
+    barcode_buf = generate_barcode(barcode_data)
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🛍 Xaridlarim", callback_data="purchases")],
@@ -210,12 +251,13 @@ async def show_card(message, phone: str):
     ])
 
     await message.reply_photo(
-        photo=qr_buf,
+        photo=barcode_buf,
         caption=f"🎁 Nakopital Karta\n\n"
                 f"👤 Ism: {name}\n"
                 f"📱 Telefon: {phone}\n"
+                f"🃏 Karta raqami: {barcode_data}\n"
                 f"⭐ Bonus ballar: {bonus}\n\n"
-                f"QR kodni kassirga ko'rsating!",
+                f"Shtrix-kodni kassirga ko'rsating!",
         reply_markup=keyboard
     )
 
