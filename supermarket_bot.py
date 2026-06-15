@@ -39,18 +39,18 @@ TEXTS = {
         "order_btn": "🔗 Buyurtma sahifasiga o'tish",
         "order_text": "🛍 Buyurtma berish uchun:",
         "operator_text": "📞 Operator bilan bog'lanish:\n\n📱 Telefon: {phone}\n\nIsh vaqti: 08:00 - 00:00 (Dush-Yak)",
-        "enter_phone": "📱 Kassada ro'yxatdan o'tgan telefon raqamingizni kiriting:\n\nMisol: +998901234567",
-        "wrong_phone": "❌ Noto'g'ri format. Misol: +998901234567 yoki 901234567",
+        "enter_phone": "🃏 Nakopital karta raqamingizni kiriting:\n\nMisol: 2900000003262",
+        "wrong_phone": "❌ Noto'g'ri format. Karta raqami 13 ta raqamdan iborat.\nMisol: 2900000003262",
         "loading": "⏳ Ma'lumot yuklanmoqda...",
-        "not_found": "❌ {phone} raqamli mijoz topilmadi.\nKassada ro'yxatdan o'tganmisiz?\n\nRaqamni qayta kiriting:",
-        "card_caption": "🎁 Nakopital Karta\n\n👤 Ism: {name}\n📱 Telefon: {phone}\n🃏 Karta raqami: {card}\n⭐ Bonus ballar: {bonus}\n\nShtrix-kodni kassirga ko'rsating!",
+        "not_found": "❌ {phone} raqamli karta topilmadi.\nKassadan nakopital karta olganmisiz?\n\nKarta raqamini qayta kiriting:",
+        "card_caption": "🎁 Nakopital Karta\n\n👤 Ism: {name}\n🃏 Karta raqami: {card}\n⭐ Bonus ballar: {bonus}\n\nShtrix-kodni kassirga ko'rsating!",
         "my_purchases": "🛍 Xaridlarim",
-        "change_phone": "🔄 Raqamni o'zgartirish",
+        "change_phone": "🔄 Karta raqamini o'zgartirish",
         "purchases_loading": "⏳ Xaridlar yuklanmoqda...",
         "purchases_empty": "🛍 Xaridlar tarixi bo'sh.",
         "purchases_title": "🛍 Oxirgi xaridlaringiz:\n\n",
         "my_card": "🎁 Kartam",
-        "enter_new_phone": "📱 Yangi telefon raqamingizni kiriting:",
+        "enter_new_phone": "🃏 Yangi karta raqamingizni kiriting:",
         "video_caption": "Ushbu qo'llanma orqali buyurtma berishni o'rganishingiz mumkin...",
         "lang_changed": "Til o'zgartirildi! 🇺🇿",
     },
@@ -66,18 +66,18 @@ TEXTS = {
         "order_btn": "🔗 Перейти к заказу",
         "order_text": "🛍 Для оформления заказа:",
         "operator_text": "📞 Связаться с оператором:\n\n📱 Телефон: {phone}\n\nРабочее время: 08:00 - 00:00 (Пн-Вс)",
-        "enter_phone": "📱 Введите номер телефона, которым вы зарегистрированы на кассе:\n\nПример: +998901234567",
-        "wrong_phone": "❌ Неверный формат. Пример: +998901234567 или 901234567",
+        "enter_phone": "🃏 Введите номер вашей накопительной карты:\n\nПример: 2900000003262",
+        "wrong_phone": "❌ Неверный формат. Номер карты состоит из 13 цифр.\nПример: 2900000003262",
         "loading": "⏳ Загрузка данных...",
-        "not_found": "❌ Клиент с номером {phone} не найден.\nВы зарегистрированы на кассе?\n\nВведите номер ещё раз:",
-        "card_caption": "🎁 Карта накопителя\n\n👤 Имя: {name}\n📱 Телефон: {phone}\n🃏 Номер карты: {card}\n⭐ Бонусные баллы: {bonus}\n\nПокажите штрих-код кассиру!",
+        "not_found": "❌ Карта с номером {phone} не найдена.\nВы получили накопительную карту на кассе?\n\nВведите номер карты ещё раз:",
+        "card_caption": "🎁 Карта накопителя\n\n👤 Имя: {name}\n🃏 Номер карты: {card}\n⭐ Бонусные баллы: {bonus}\n\nПокажите штрих-код кассиру!",
         "my_purchases": "🛍 Мои покупки",
-        "change_phone": "🔄 Изменить номер",
+        "change_phone": "🔄 Изменить номер карты",
         "purchases_loading": "⏳ Загрузка покупок...",
         "purchases_empty": "🛍 История покупок пуста.",
         "purchases_title": "🛍 Последние покупки:\n\n",
         "my_card": "🎁 Моя карта",
-        "enter_new_phone": "📱 Введите новый номер телефона:",
+        "enter_new_phone": "🃏 Введите новый номер карты:",
         "video_caption": "С помощью этой инструкции вы узнаете как оформить заказ...",
         "lang_changed": "Язык изменён! 🇷🇺",
     }
@@ -199,35 +199,33 @@ def phone_variants(phone: str):
 # ==============================
 # MOYSKLAD API
 # ==============================
-async def get_customer_by_phone(phone: str):
+async def get_customer_by_card(card_number: str):
     headers = {"Authorization": f"Bearer {MS_TOKEN}"}
-    variants = phone_variants(phone)
+    card = card_number.strip()
 
     async with aiohttp.ClientSession() as session:
-        for variant in variants:
-            async with session.get(
-                f"{MS_URL}/entity/counterparty",
-                headers=headers,
-                params={"filter": f"phone={variant}", "limit": 1}
-            ) as resp:
-                data = await resp.json()
-                rows = data.get("rows", [])
-                if rows:
-                    return rows[0]
-
-        digits = ''.join(filter(str.isdigit, phone))
-        short = digits[-9:] if len(digits) >= 9 else digits
+        # discountCardNumber bo'yicha qidirish
         async with session.get(
             f"{MS_URL}/entity/counterparty",
             headers=headers,
-            params={"search": short, "limit": 10}
+            params={"filter": f"discountCardNumber={card}", "limit": 1}
+        ) as resp:
+            data = await resp.json()
+            rows = data.get("rows", [])
+            if rows:
+                return rows[0]
+
+        # search orqali qidirish
+        async with session.get(
+            f"{MS_URL}/entity/counterparty",
+            headers=headers,
+            params={"search": card, "limit": 10}
         ) as resp:
             data = await resp.json()
             rows = data.get("rows", [])
             for row in rows:
-                row_phones = row.get("phone", "") or ""
-                row_digits = ''.join(filter(str.isdigit, row_phones))
-                if short in row_digits:
+                row_card = row.get("discountCardNumber", "") or ""
+                if row_card == card:
                     return row
 
     return None
@@ -296,20 +294,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==============================
 # KARTA
 # ==============================
-async def show_card(message, phone: str, lang: str):
+async def show_card(message, card_number: str, lang: str):
     await message.reply_text(t(lang, "loading"))
-    customer = await get_customer_by_phone(phone)
+    customer = await get_customer_by_card(card_number)
 
     if not customer:
         user_id = message.chat.id
         await delete_user_phone(user_id)
-        await message.reply_text(t(lang, "not_found", phone=phone))
+        await message.reply_text(t(lang, "not_found", phone=card_number))
         return
 
     name = customer.get("name", "")
     customer_id = customer.get("id", "")
-    discount_card = customer.get("discountCardNumber", "") or ""
-    barcode_data = discount_card if discount_card else customer_id[:13]
+    barcode_data = card_number
     bonus = await get_customer_bonus(customer_id)
     barcode_buf = generate_barcode(barcode_data)
 
@@ -320,7 +317,7 @@ async def show_card(message, phone: str, lang: str):
 
     await message.reply_photo(
         photo=barcode_buf,
-        caption=t(lang, "card_caption", name=name, phone=phone, card=barcode_data, bonus=bonus),
+        caption=t(lang, "card_caption", name=name, card=barcode_data, bonus=bonus),
         reply_markup=keyboard
     )
 
@@ -328,9 +325,9 @@ async def show_card(message, phone: str, lang: str):
 # ==============================
 # XARIDLAR
 # ==============================
-async def show_purchases(message, phone: str, lang: str):
+async def show_purchases(message, card_number: str, lang: str):
     await message.reply_text(t(lang, "purchases_loading"))
-    customer = await get_customer_by_phone(phone)
+    customer = await get_customer_by_card(card_number)
 
     if not customer:
         await message.reply_text("❌")
@@ -400,16 +397,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await get_user_lang(user_id)
     is_admin = user_id in ADMIN_IDS
 
-    # Telefon raqam kutilayotgan bo'lsa
+    # Karta raqam kutilayotgan bo'lsa
     if context.user_data.get("waiting_phone"):
-        phone = text.strip()
-        digits = ''.join(filter(str.isdigit, phone))
-        if len(digits) < 9:
+        card = text.strip()
+        digits = ''.join(filter(str.isdigit, card))
+        if len(digits) < 10:
             await update.message.reply_text(t(lang, "wrong_phone"))
             return
         context.user_data["waiting_phone"] = False
-        await save_user_phone(user_id, phone)
-        await show_card(update.message, phone, lang)
+        await save_user_phone(user_id, digits)
+        await show_card(update.message, digits, lang)
         return
 
     # Admin xabar yuborish rejimi
