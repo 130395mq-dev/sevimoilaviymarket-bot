@@ -10,7 +10,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8617768849:AAGeu2DFAZrJYi1kJqanD2M-yEnbERqruAE")
 ORDER_LINK = "https://b2b.moysklad.ru/public/Bya8IC3N6odI"
-OPERATOR_PHONE = "+998900769441"
+OPERATOR_PHONE = "+998975540666"
 VIDEO_URL = os.environ.get("VIDEO_URL", "YOUR_VIDEO_FILE_ID")
 MS_TOKEN = os.environ.get("MS_TOKEN", "a147c1756372f5ed43ead9c6b77d1b8ab56ae35a")
 MS_URL = "https://api.moysklad.ru/api/remap/1.2"
@@ -38,7 +38,7 @@ TEXTS = {
         "admin_panel": "👨‍💼 Admin Panel",
         "order_btn": "🔗 Buyurtma sahifasiga o'tish",
         "order_text": "🛍 Buyurtma berish uchun:",
-        "operator_text": "📞 Operator bilan bog'lanish:\n\n📱 Telefon: {phone}\n\nIsh vaqti: 08:00 - 00:00 (Dush-Yak)",
+        "operator_text": "📞 Operator bilan bog'lanish:\n\n📱 Telefon: {phone}\n\nIsh vaqti: 10:00 - 22:00 (Dush-Yak)",
         "enter_phone": "🃏 Nakopital karta raqamingizni kiriting:\n\nMisol: 2900000000000",
         "wrong_phone": "❌ Noto'g'ri format. Karta raqami 13 ta raqamdan iborat.\nMisol: 2900000003262",
         "loading": "⏳ Ma'lumot yuklanmoqda...",
@@ -65,7 +65,7 @@ TEXTS = {
         "admin_panel": "👨‍💼 Admin Panel",
         "order_btn": "🔗 Перейти к заказу",
         "order_text": "🛍 Для оформления заказа:",
-        "operator_text": "📞 Связаться с оператором:\n\n📱 Телефон: {phone}\n\nРабочее время: 08:00 - 00:00 (Пн-Вс)",
+        "operator_text": "📞 Связаться с оператором:\n\n📱 Телефон: {phone}\n\nРабочее время: 10:00 - 22:00 (Пн-Вс)",
         "enter_phone": "🃏 Введите номер вашей накопительной карты:\n\nПример: 2900000000000",
         "wrong_phone": "❌ Неверный формат. Номер карты состоит из 13 цифр.\nПример: 2900000003262",
         "loading": "⏳ Загрузка данных...",
